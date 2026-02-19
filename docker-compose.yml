@@ -1,0 +1,12 @@
+services:
+  backend:
+    image: joaovjm/demigtools-backend
+    container_name: demigtools-backend
+    ports:
+      - "3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: unless-stopped

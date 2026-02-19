@@ -1,0 +1,22 @@
+{
+  "type": "module",
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.95.3",
+    "bwip-js": "^4.8.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.4",
+    "express": "^5.2.1",
+    "extenso": "^2.1.0",
+    "formidable": "^3.5.4",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^8.0.1",
+    "pdfmake": "^0.2.7",
+    "twilio": "^5.12.1"
+  }
+}

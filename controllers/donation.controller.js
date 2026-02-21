@@ -1,4 +1,9 @@
-import { insert, remove, getAllReceived } from "../services/donation.service.js";
+import {
+  insert,
+  remove,
+  getAllReceived,
+  update as updateDonationService,
+} from "../services/donation.service.js";
 
 export async function insertDonation(req, res, next) {
 
@@ -21,12 +26,21 @@ export async function deleteDonation(req, res, next) {
 }
 
 export async function getAllReceivedDonations(req, res, next) {
+  try {
+    const { startDate, endDate } = req.query;
+    const data = await getAllReceived({ startDate, endDate });
+    res.status(200).json(data);
+  } catch (error) {
+    next(error);
+  }
+}
 
-    try {
-        const { startDate, endDate } = req.query;
-        const data = await getAllReceived({ startDate, endDate });
-        res.status(200).json(data);
-    } catch (error) {
-        next(error);
-    }
+export async function updateDonation(req, res, next) {
+  try {
+    const { id } = req.params;
+    const data = await updateDonationService(Number(id), req.body);
+    res.status(200).json(data);
+  } catch (error) {
+    next(error);
+  }
 }

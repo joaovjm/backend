@@ -5,6 +5,8 @@ import emailRoutes from "./email.routes.js";
 import depositPdfRoutes from "./depositPdf.routes.js";
 import donationRoutes from "./donation.routes.js";
 import dashboardRoutes from "./dashboard.routes.js";
+import searchDonorRoutes from "./searchDonor.routes.js";
+import donorRoutes from "./donor.routes.js";
 
 const router = Router();
 
@@ -13,5 +15,7 @@ router.use("/message", messageRoutes);
 router.use("/deposit-pdf", depositPdfRoutes);
 router.use("/donation", donationRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/searchdonor", searchDonorRoutes);
+router.use("/donor", donorRoutes);
 
 export default router;

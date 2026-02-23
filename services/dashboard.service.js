@@ -52,6 +52,7 @@ async function getReceivedAndMetaFromPool({ startDate, endDate, operatorId }) {
       SELECT
         d.receipt_donation_id,
         d.donation_value,
+        d.donation_extra,
         d.donation_day_received,
         d.operator_code_id,
         donor.donor_name,
@@ -75,6 +76,7 @@ async function getReceivedAndMetaFromPool({ startDate, endDate, operatorId }) {
               'operator_name', operator_name,
               'operator_code_id', operator_code_id,
               'donation_value', donation_value,
+              'donation_extra', donation_extra,
               'donation_day_received', donation_day_received
             )
           ) FILTER (WHERE receipt_donation_id IS NOT NULL),
@@ -84,7 +86,13 @@ async function getReceivedAndMetaFromPool({ startDate, endDate, operatorId }) {
     ),
     meta_agg AS (
       SELECT COALESCE(json_agg(m), '[]') AS meta
-      FROM (SELECT * FROM operator_meta WHERE status = 'Ativo' ORDER BY start_date DESC LIMIT 1) m
+      FROM (
+        SELECT * FROM operator_meta
+        WHERE status = 'Ativo'
+          AND ($3::int IS NULL OR operator_code_id = $3)
+        ORDER BY start_date DESC
+        LIMIT 1
+      ) m
     )
     SELECT
       r.value_received,
@@ -353,6 +361,190 @@ async function safeGet(name, fn, fallback) {
 }
 
 /**
+ * Leads agendados (leads_status = 'agendado') para o operador.
+ */
+async function getScheduledLeadsFromPool(operatorId) {
+  const id = Number(operatorId);
+  if (!id) return [];
+
+  const query = `
+    SELECT l.*, op.operator_name
+    FROM leads l
+    LEFT JOIN operator op ON op.operator_code_id = l.operator_code_id
+    WHERE l.leads_status = 'agendado' AND l.operator_code_id = $1
+    ORDER BY l.leads_scheduling_date ASC NULLS LAST
+  `;
+  const { rows } = await pool.query(query, [id]);
+  return rows || [];
+}
+
+/**
+ * Requests agendados (request_status contém 'Agendado') para o operador.
+ */
+async function getSchedulingRequestFromPool(operatorId) {
+  const id = Number(operatorId);
+  if (!id) return [];
+
+  const query = `
+    SELECT
+      r.id,
+      r.donor_id,
+      r.operator_code_id,
+      r.request_scheduled_date,
+      r.request_observation,
+      r.request_tel_success,
+      d.donor_name,
+      d.donor_address,
+      d.donor_tel_1
+    FROM request r
+    LEFT JOIN donor d ON d.donor_id = r.donor_id
+    WHERE r.operator_code_id = $1
+      AND r.request_active = 'True'
+      AND r.request_status::text LIKE '%Agendado%'
+    ORDER BY r.request_scheduled_date ASC NULLS LAST
+  `;
+  try {
+    const { rows } = await pool.query(query, [id]);
+    return (rows || []).map((row) => ({
+      id: row.id,
+      donor_id: row.donor_id,
+      operator_code_id: row.operator_code_id,
+      request_scheduled_date: row.request_scheduled_date,
+      request_observation: row.request_observation,
+      request_tel_success: row.request_tel_success,
+      donor: {
+        donor_name: row.donor_name,
+        donor_address: row.donor_address,
+        donor_tel_1: row.donor_tel_1,
+      },
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Doações com confirmation_status = 'Agendado' para o operador.
+ */
+async function getScheduledDonationsFromPool(operatorId) {
+  const id = Number(operatorId);
+  if (!id) return [];
+
+  const query = `
+    SELECT
+      d.receipt_donation_id,
+      d.donor_id,
+      d.operator_code_id,
+      d.confirmation_scheduled,
+      d.confirmation_status,
+      d.confirmation_observation,
+      d.donation_value,
+      d.donation_day_contact,
+      donor.donor_name,
+      donor.donor_tel_1,
+      donor.donor_address,
+      donor.donor_city,
+      donor.donor_neighborhood,
+      op.operator_name
+    FROM donation d
+    LEFT JOIN donor ON donor.donor_id = d.donor_id
+    LEFT JOIN operator op ON op.operator_code_id = d.operator_code_id
+    WHERE d.confirmation_status = 'Agendado'
+      AND d.confirmation_scheduled IS NOT NULL
+      AND d.operator_code_id = $1
+    ORDER BY d.confirmation_scheduled ASC
+  `;
+  const { rows } = await pool.query(query, [id]);
+  return (rows || []).map((row) => ({
+    id: row.receipt_donation_id,
+    donor_id: row.donor_id,
+    operator_code_id: row.operator_code_id,
+    scheduled_date: row.confirmation_scheduled,
+    scheduled_observation: row.confirmation_observation || null,
+    scheduled_tel_success: row.donor_tel_1 || null,
+    scheduled_value: row.donation_value,
+    donor: {
+      donor_name: row.donor_name,
+      donor_tel_1: row.donor_tel_1,
+      donor_address: row.donor_address,
+      donor_city: row.donor_city,
+      donor_neighborhood: row.donor_neighborhood,
+    },
+    operator_name: row.operator_name,
+    donation_id: row.receipt_donation_id,
+    source: "donation_agendada",
+  }));
+}
+
+/**
+ * Agendados da tabela scheduled (status = 'pendente') para o operador.
+ */
+async function getScheduledFromTableFromPool(operatorId) {
+  const id = Number(operatorId);
+  if (!id) return [];
+
+  const query = `
+    SELECT
+      s.scheduled_id,
+      s.operator_code_id,
+      s.scheduled_date,
+      s.observation,
+      s.entity_type,
+      s.entity_id,
+      op.operator_name
+    FROM scheduled s
+    LEFT JOIN operator op ON op.operator_code_id = s.operator_code_id
+    WHERE s.status = 'pendente' AND s.operator_code_id = $1
+    ORDER BY s.scheduled_date ASC
+  `;
+  const { rows } = await pool.query(query, [id]);
+  if (!rows?.length) return [];
+
+  const donorIds = rows
+    .filter((r) => r.entity_type === "doação" && r.entity_id)
+    .map((r) => r.entity_id);
+
+  let donorsMap = {};
+  if (donorIds.length > 0) {
+    const placeholders = donorIds.map((_, i) => `$${i + 1}`).join(", ");
+    const donorQuery = `
+      SELECT donor_id, donor_name, donor_tel_1, donor_address, donor_city, donor_neighborhood
+      FROM donor WHERE donor_id IN (${placeholders})
+    `;
+    const { rows: donorRows } = await pool.query(donorQuery, donorIds);
+    donorRows?.forEach((d) => {
+      donorsMap[d.donor_id] = d;
+    });
+  }
+
+  return rows.map((s) => {
+    const donor =
+      s.entity_type === "doação" && s.entity_id ? donorsMap[s.entity_id] : null;
+    return {
+      id: s.scheduled_id,
+      donor_id: s.entity_type === "doação" ? s.entity_id : null,
+      operator_code_id: s.operator_code_id,
+      scheduled_date: s.scheduled_date,
+      scheduled_observation: s.observation || null,
+      scheduled_tel_success: donor?.donor_tel_1 || null,
+      donor: donor
+        ? {
+            donor_name: donor.donor_name,
+            donor_tel_1: donor.donor_tel_1,
+            donor_address: donor.donor_address,
+            donor_city: donor.donor_city,
+            donor_neighborhood: donor.donor_neighborhood,
+          }
+        : null,
+      operator_name: s.operator_name,
+      entity_type: s.entity_type,
+      entity_id: s.entity_id,
+      source: "scheduled_table",
+    };
+  });
+}
+
+/**
  * Dashboard consolidado.
  * - operatorType === 'Admin': received, not-received e confirmation de todos os operadores.
  * - Caso contrário: filtrado por operatorId.
@@ -425,10 +617,38 @@ export async function getDashboard({
       ? JSON.parse(poolResult.meta || "[]")
       : poolResult.meta || [];
 
-  const scheduled =
-    typeof poolResult.scheduled === "string"
-      ? JSON.parse(poolResult.scheduled || "[]")
-      : poolResult.scheduled || [];
+  let scheduled = [];
+  let scheduledDonations = [];
+  let scheduledFromTable = [];
+
+  if (filterOperatorId) {
+    const [leads, requestAgendado, donationsAgendadas, tableAgendados] =
+      await Promise.all([
+        safeGet(
+          "getScheduledLeadsFromPool",
+          () => getScheduledLeadsFromPool(filterOperatorId),
+          []
+        ),
+        safeGet(
+          "getSchedulingRequestFromPool",
+          () => getSchedulingRequestFromPool(filterOperatorId),
+          []
+        ),
+        safeGet(
+          "getScheduledDonationsFromPool",
+          () => getScheduledDonationsFromPool(filterOperatorId),
+          []
+        ),
+        safeGet(
+          "getScheduledFromTableFromPool",
+          () => getScheduledFromTableFromPool(filterOperatorId),
+          []
+        ),
+      ]);
+    scheduled = [...(leads || []), ...(requestAgendado || [])];
+    scheduledDonations = donationsAgendadas || [];
+    scheduledFromTable = tableAgendados || [];
+  }
 
   return {
     valueReceived: Number(poolResult.value_received) || 0,
@@ -442,7 +662,8 @@ export async function getDashboard({
     operatorActivities,
     meta,
     scheduled,
-    scheduledDonations: [],
+    scheduledDonations,
+    scheduledFromTable,
     donorMonthlyPercentDailyEvolution: donorEvolution,
   };
 }

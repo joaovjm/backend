@@ -1,9 +1,19 @@
 import {
+  getCampaigns as getCampaignsService,
   insert,
   remove,
   getAllReceived,
   update as updateDonationService,
 } from "../services/donation.service.js";
+
+export async function getCampaigns(req, res, next) {
+  try {
+    const data = await getCampaignsService();
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function insertDonation(req, res, next) {
 

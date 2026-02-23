@@ -1,41 +1,48 @@
 import pool from "../db/db.js";
 
-export async function insert(donationData) {
-  let request_name_searched = "";
-  let scheduledId = null;
+/**
+ * Lista campanhas ativas para selects (ex.: ModalWorklist, ModalDonation).
+ */
+export async function getCampaigns() {
+  const { rows } = await pool.query(
+    `SELECT id, campain_name FROM campain WHERE active = true ORDER BY campain_name`
+  );
+  return rows || [];
+}
 
+export async function insert(donationData) {
   try {
     let requestId = null;
 
-    // Verificar se existe um request ativo para este donor_id
-    if (
-      donationData.donation_worklist === null ||
-      donationData.donation_worklist === undefined ||
-      donationData.donation_worklist === ""
-    ) {
-      const requestResult = await pool.query(
-        `SELECT id, request_name FROM request
-         WHERE donor_id = $1 AND request_active = 'True'
-         LIMIT 1`,
-        [donationData.donor_id]
-      );
-      const requestRow = requestResult.rows[0];
-      if (requestRow) {
-        request_name_searched = requestRow.request_name;
-        requestId = requestRow.id;
-      }
+    // Verificar se existe um request ativo para este donor_id,
+    // priorizando o nome da worklist quando informado.
+    const hasWorklistName =
+      donationData.donation_worklist !== null &&
+      donationData.donation_worklist !== undefined &&
+      String(donationData.donation_worklist).trim() !== "";
+
+    const requestParams = [donationData.donor_id];
+    let requestQuery = `
+      SELECT id, request_name
+      FROM request
+      WHERE donor_id = $1
+        AND request_active = 'True'
+    `;
+
+    if (hasWorklistName) {
+      requestQuery += " AND request_name = $2";
+      requestParams.push(String(donationData.donation_worklist).trim());
     }
 
-    // Verifica se existem algum agendamento para esta doação
-    const scheduledResult = await pool.query(
-      `SELECT scheduled_id FROM scheduled
-       WHERE entity_id = $1 AND entity_type = 'doação'
-       LIMIT 1`,
-      [donationData.donor_id]
-    );
-    const scheduledRow = scheduledResult.rows[0];
-    if (scheduledRow) {
-      scheduledId = scheduledRow.scheduled_id;
+    requestQuery += `
+      ORDER BY id DESC
+      LIMIT 1
+    `;
+
+    const requestResult = await pool.query(requestQuery, requestParams);
+    const requestRow = requestResult.rows[0];
+    if (requestRow) {
+      requestId = requestRow.id;
     }
 
     // Inserir a doação
@@ -89,27 +96,28 @@ export async function insert(donationData) {
         );
       }
 
-      // Exclui o agendamento se existir
-      if (scheduledId) {
-        try {
-          await pool.query(
-            "DELETE FROM scheduled WHERE scheduled_id = $1",
-            [scheduledId]
-          );
-        } catch (deleteScheduledError) {
-          console.log(
-            "Erro ao excluir agendamento",
-            deleteScheduledError.message
-          );
-        }
+      // Excluir TODOS os agendamentos deste doador na tabela scheduled
+      try {
+        await pool.query(
+          `DELETE FROM scheduled
+           WHERE entity_id = $1 AND entity_type = 'doação'`,
+          [donationData.donor_id]
+        );
+      } catch (deleteScheduledError) {
+        console.log(
+          "Erro ao excluir agendamentos",
+          deleteScheduledError.message
+        );
       }
 
       // Se encontrou um request ativo, atualizar o status para "Sucesso"
+      // request_status é json/jsonb: enviar array como JSON
       if (requestId) {
         try {
+          const statusJson = JSON.stringify(["Sucesso"]);
           await pool.query(
-            "UPDATE request SET request_status = 'Sucesso' WHERE id = $1",
-            [requestId]
+            "UPDATE request SET request_status = $2 WHERE id = $1",
+            [requestId, statusJson]
           );
         } catch (updateError) {
           console.log(
@@ -265,18 +273,50 @@ export async function update(receiptDonationId, payload) {
     toNullIfEmpty(donation_day_to_receive),
     toNullIfEmpty(donation_day_received),
     toNullIfEmpty(donation_description),
-    operator_code_id ?? null,
+    toNullIfEmpty(operator_code_id),
     donation_print ?? "Não",
     donation_received ?? "Não",
     toNullIfEmpty(donation_monthref),
-    collector_code_id ?? null,
+    toNullIfEmpty(collector_code_id),
     toNullIfEmpty(donation_campain),
   ];
   const result = await pool.query(query, values);
   if (result.rows.length === 0) {
     throw new Error("Doação não encontrada");
   }
-  return result.rows[0];
+
+  const updatedRow = result.rows[0];
+  const receivedValue =
+    donation_received === "Sim" || String(donation_received).trim() === "Sim";
+
+  if (updatedRow.donor_id) {
+    try {
+      const requestResult = await pool.query(
+        `SELECT id FROM request
+         WHERE donor_id = $1 AND request_active = 'True'
+         ORDER BY id DESC
+         LIMIT 1`,
+        [updatedRow.donor_id]
+      );
+      const requestRow = requestResult.rows[0];
+      if (requestRow) {
+        const statusJson = JSON.stringify(
+          receivedValue ? ["Recebido"] : ["Sucesso"]
+        );
+        await pool.query(
+          "UPDATE request SET request_status = $2::jsonb WHERE id = $1",
+          [requestRow.id, statusJson]
+        );
+      }
+    } catch (err) {
+      console.log(
+        "Erro ao atualizar status do request:",
+        err?.message
+      );
+    }
+  }
+
+  return updatedRow;
 }
 
 export async function getAllReceived({ startDate, endDate }) {

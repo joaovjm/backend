@@ -7,6 +7,7 @@ import donationRoutes from "./donation.routes.js";
 import dashboardRoutes from "./dashboard.routes.js";
 import searchDonorRoutes from "./searchDonor.routes.js";
 import donorRoutes from "./donor.routes.js";
+import worklistRoutes from "./worklist.routes.js";
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use("/donation", donationRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/searchdonor", searchDonorRoutes);
 router.use("/donor", donorRoutes);
+router.use("/worklist", worklistRoutes);
 
 export default router;

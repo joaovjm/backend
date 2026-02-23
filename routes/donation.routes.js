@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  getCampaigns,
   insertDonation,
   deleteDonation,
   getAllReceivedDonations,
@@ -8,6 +9,7 @@ import {
 
 const router = Router();
 
+router.get("/campaigns", getCampaigns);
 router.post("/insert-donation", insertDonation);
 router.delete("/delete-donation/:id", deleteDonation);
 router.get("/get-all-received-donations", getAllReceivedDonations);

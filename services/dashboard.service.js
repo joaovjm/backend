@@ -25,7 +25,8 @@ function isDateMissing(value) {
 
 /**
  * Normaliza startDate e endDate para toda a dashboard:
- * - Se não recebidos ou vierem como undefined/null/string vazia → primeiro dia do mês atual até o dia atual da consulta.
+ * - Sem filtro de data → início = primeiro dia do mês atual; fim = sem limite (null).
+ * - Com filtro → usa as datas informadas.
  */
 function normalizeDateRange(startDate, endDate) {
   const now = new Date();
@@ -33,12 +34,9 @@ function normalizeDateRange(startDate, endDate) {
   const y = firstDay.getFullYear();
   const m = String(firstDay.getMonth() + 1).padStart(2, "0");
   const d = String(firstDay.getDate()).padStart(2, "0");
-  const todayY = now.getFullYear();
-  const todayM = String(now.getMonth() + 1).padStart(2, "0");
-  const todayD = String(now.getDate()).padStart(2, "0");
 
   const start = isDateMissing(startDate) ? `${y}-${m}-${d}` : String(startDate).trim();
-  const end = isDateMissing(endDate) ? `${todayY}-${todayM}-${todayD}` : String(endDate).trim();
+  const end = isDateMissing(endDate) ? null : String(endDate).trim();
 
   return { startDate: start, endDate: end };
 }
@@ -112,7 +110,14 @@ async function getReceivedAndMetaFromPool({ startDate, endDate, operatorId }) {
 }
 
 /**
- * Busca doações não recebidas no Postgres e separa confirmação / em aberto
+ * Busca doações não recebidas no Postgres e separa confirmação / em aberto.
+ *
+ * Critérios:
+ * - EM ABERTO (sem coletador 10): donation_received = 'Não' e collector_code_id != 10.
+ *   Admin: todas; Operador: operator_code_id = operador logado.
+ * - CONFIRMAÇÃO: collector_code_id = 10.
+ *   Admin: todas; Operador: operator_code_id = operador logado.
+ * Não filtra por donation_day_to_receive para incluir todas as fichas em aberto/confirmação.
  */
 async function getNotReceivedFromPool({
   startDate,
@@ -170,11 +175,10 @@ async function getNotReceivedFromPool({
     ) dm ON true
     WHERE (d.donation_received = 'Não' OR d.donation_received = 'Nao')
       AND (d.collector_code_id IS NULL OR d.collector_code_id != 11)
-      AND (d.donation_day_to_receive IS NULL OR (d.donation_day_to_receive >= $1::date AND d.donation_day_to_receive <= $2::date))
-      AND ($3::int IS NULL OR d.operator_code_id = $3)
+      AND ($1::int IS NULL OR d.operator_code_id = $1)
     ORDER BY d.donation_day_to_receive DESC NULLS LAST
   `;
-  const values = [startDate, endDate, operatorId || null];
+  const values = [operatorId || null];
 
   let rows = [];
   try {
@@ -185,8 +189,8 @@ async function getNotReceivedFromPool({
     return getEmptyNotReceived();
   }
 
-  const donationConfirmation = [];
-  const fullNotReceivedDonations = [];
+  let donationConfirmation = [];
+  let fullNotReceivedDonations = [];
   let confirmations = 0;
   let valueConfirmations = 0;
   let openDonations = 0;
@@ -282,23 +286,29 @@ function getEmptyNotReceived() {
 
 /**
  * Busca atividades de operadoras no Postgres (tabela operator_activity)
+ * Quando endDate é null, não há limite máximo (tudo a partir de startDate).
  */
 async function getOperatorActivitiesFromPool({ startDate, endDate }) {
   const query = `
     SELECT *
     FROM operator_activity
     WHERE created_at >= $1::timestamptz
-      AND created_at <= $2::timestamptz
+      AND ($2::timestamptz IS NULL OR created_at <= $2::timestamptz)
     ORDER BY created_at DESC
   `;
   const from = new Date(startDate);
   from.setHours(0, 0, 0, 0);
-  const to = new Date(endDate);
-  to.setHours(23, 59, 59, 999);
+  const toIso = endDate
+    ? (() => {
+        const to = new Date(endDate);
+        to.setHours(23, 59, 59, 999);
+        return to.toISOString();
+      })()
+    : null;
 
   let rows = [];
   try {
-    const result = await pool.query(query, [from.toISOString(), to.toISOString()]);
+    const result = await pool.query(query, [from.toISOString(), toIso]);
     rows = result.rows || [];
   } catch {
     return { activities: [], grouped: {} };
@@ -548,7 +558,7 @@ async function getScheduledFromTableFromPool(operatorId) {
  * Dashboard consolidado.
  * - operatorType === 'Admin': received, not-received e confirmation de todos os operadores.
  * - Caso contrário: filtrado por operatorId.
- * startDate/endDate não informados = primeiro dia do mês atual até hoje.
+ * startDate/endDate não informados = primeiro dia do mês atual, sem limite máximo.
  */
 export async function getDashboard({
   startDate,

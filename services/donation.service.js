@@ -3,6 +3,16 @@ import pool from "../db/db.js";
 /**
  * Lista campanhas ativas para selects (ex.: ModalWorklist, ModalDonation).
  */
+/**
+ * Retorna a configuração de recibo (primeira linha de receipt_config).
+ */
+export async function getReceiptConfig() {
+  const { rows } = await pool.query(
+    `SELECT * FROM receipt_config ORDER BY id ASC LIMIT 1`
+  );
+  return rows?.[0] ?? null;
+}
+
 export async function getCampaigns() {
   const { rows } = await pool.query(
     `SELECT id, campain_name FROM campain WHERE active = true ORDER BY campain_name`
@@ -248,6 +258,7 @@ export async function update(receiptDonationId, payload) {
     donation_monthref,
     collector_code_id,
     donation_campain,
+    donation_deposit_receipt_send,
   } = payload;
 
   const query = `
@@ -262,7 +273,8 @@ export async function update(receiptDonationId, payload) {
       donation_received = COALESCE($9, donation_received),
       donation_monthref = COALESCE($10, donation_monthref),
       collector_code_id = COALESCE($11, collector_code_id),
-      donation_campain = COALESCE($12, donation_campain)
+      donation_campain = COALESCE($12, donation_campain),
+      donation_deposit_receipt_send = COALESCE($13, donation_deposit_receipt_send)
     WHERE receipt_donation_id = $1
     RETURNING *
   `;
@@ -279,6 +291,7 @@ export async function update(receiptDonationId, payload) {
     toNullIfEmpty(donation_monthref),
     toNullIfEmpty(collector_code_id),
     toNullIfEmpty(donation_campain),
+    toNullIfEmpty(donation_deposit_receipt_send),
   ];
   const result = await pool.query(query, values);
   if (result.rows.length === 0) {

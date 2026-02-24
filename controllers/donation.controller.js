@@ -1,5 +1,6 @@
 import {
   getCampaigns as getCampaignsService,
+  getReceiptConfig as getReceiptConfigService,
   insert,
   remove,
   getAllReceived,
@@ -50,6 +51,15 @@ export async function updateDonation(req, res, next) {
     const { id } = req.params;
     const data = await updateDonationService(Number(id), req.body);
     res.status(200).json(data);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getReceiptConfig(req, res, next) {
+  try {
+    const data = await getReceiptConfigService();
+    res.json(data);
   } catch (error) {
     next(error);
   }

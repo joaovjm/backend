@@ -10,6 +10,76 @@ import { getDonorById } from "./donor.service.js";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
+async function getTaskForNotification(id) {
+  const numericId = Number(id);
+  if (!numericId) return null;
+
+  const { rows } = await pool.query(
+    `
+    SELECT
+      t.id,
+      t.reason,
+      t.status,
+      t.priority,
+      t.operator_required,
+      t.operator_activity_conclude,
+      t.created_at,
+      t.updated_at,
+      t.admin_reason,
+      op_req.operator_code_id AS req_operator_code_id,
+      op_req.operator_name AS req_operator_name,
+      op_concl.operator_code_id AS concl_operator_code_id,
+      op_concl.operator_name AS concl_operator_name
+    FROM task_manager t
+    LEFT JOIN operator op_req ON op_req.operator_code_id = t.operator_required
+    LEFT JOIN operator op_concl ON op_concl.operator_code_id = t.operator_activity_conclude
+    WHERE t.id = $1
+  `,
+    [numericId]
+  );
+
+  const t = rows[0];
+  if (!t) return null;
+
+  return {
+    id: t.id,
+    reason: t.reason,
+    status: t.status,
+    priority: t.priority,
+    operator_required: t.operator_required,
+    operator_activity_conclude: t.operator_activity_conclude,
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+    admin_reason: t.admin_reason,
+    operator_required_info:
+      t.req_operator_code_id != null
+        ? {
+            operator_code_id: t.req_operator_code_id,
+            operator_name: t.req_operator_name,
+          }
+        : null,
+    operator_conclude_info:
+      t.concl_operator_code_id != null
+        ? {
+            operator_code_id: t.concl_operator_code_id,
+            operator_name: t.concl_operator_name,
+          }
+        : null,
+  };
+}
+
+async function notifyTaskManagerEvent(type, taskId) {
+  try {
+    const task = await getTaskForNotification(taskId);
+    if (!task) return;
+    await pool.query("NOTIFY task_manager_events, $1", [
+      JSON.stringify({ type, task }),
+    ]);
+  } catch {
+    // Notificação é best-effort, não deve quebrar fluxo principal
+  }
+}
+
 /**
  * Retorna lista paginada de tasks com totais para a dashboard.
  * Filtros opcionais: status ('all' | 'pendente' | ... | 'prioridade_alta'), search (texto).
@@ -212,7 +282,11 @@ export async function createTask(payload) {
     now,
   ];
   const { rows } = await pool.query(query, values);
-  return rows[0];
+  const row = rows[0];
+  if (!row) return null;
+
+  await notifyTaskManagerEvent("created", row.id);
+  return row;
 }
 
 /**
@@ -246,6 +320,8 @@ export async function updateTaskStatus(taskId, status, operatorCodeId = null) {
   `;
   const { rows } = await pool.query(query, values);
   if (rows.length === 0) throw new Error("Tarefa não encontrada");
+
+  await notifyTaskManagerEvent("updated", id);
   return rows[0];
 }
 
@@ -274,6 +350,8 @@ export async function concludeTask(taskId, adminReason, operatorCodeId = null) {
   ];
   const { rows } = await pool.query(query, values);
   if (rows.length === 0) throw new Error("Tarefa não encontrada");
+
+  await notifyTaskManagerEvent("updated", id);
   return rows[0];
 }
 

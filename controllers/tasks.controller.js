@@ -1,3 +1,4 @@
+import pool from "../db/db.js";
 import {
   getTasksPage,
   createTask,
@@ -138,4 +139,51 @@ export async function concludeTaskController(req, res) {
         process.env.NODE_ENV !== "production" ? error?.message : undefined,
     });
   }
+}
+
+/**
+ * GET /tasks/stream
+ * Stream de eventos de task_manager via Server-Sent Events (SSE) usando LISTEN/NOTIFY do Postgres.
+ */
+export async function tasksStreamController(req, res) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  res.flushHeaders?.();
+
+  const client = await pool.connect();
+  await client.query("LISTEN task_manager_events");
+
+  const sendEvent = (payload) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const onNotification = (msg) => {
+    if (!msg.payload) return;
+    try {
+      const payload = JSON.parse(msg.payload);
+      sendEvent(payload);
+    } catch {
+      // Ignora payload inválido
+    }
+  };
+
+  client.on("notification", onNotification);
+
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 30000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    client.removeListener("notification", onNotification);
+    client
+      .query("UNLISTEN task_manager_events")
+      .catch(() => {})
+      .finally(() => {
+        client.release();
+      });
+    res.end();
+  });
 }

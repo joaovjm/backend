@@ -17,6 +17,8 @@ import operatorWorkRoutes from "./operatorWork.routes.js";
 import monthHistoryRoutes from "./monthHistory.routes.js";
 import receiverDonationsRoutes from "./receiverDonations.routes.js";
 import checkPrintRoutes from "./checkPrint.routes.js";
+import createMensalDonationRoutes from "./createMensalDonation.routes.js";
+import taskDevelopmentRoutes from "./taskDevelopment.routes.js";
 
 const router = Router();
 
@@ -37,5 +39,7 @@ router.use("/operator-work", operatorWorkRoutes);
 router.use("/monthhistory", monthHistoryRoutes);
 router.use("/receiverdonations", receiverDonationsRoutes);
 router.use("/check-print", checkPrintRoutes);
+router.use("/createmensaldonation", createMensalDonationRoutes);
+router.use("/taskdevelopment", taskDevelopmentRoutes);
 
 export default router;

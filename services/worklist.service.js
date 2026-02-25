@@ -2,7 +2,8 @@ import pool from "../db/db.js";
 
 /**
  * Retorna os nomes das listas de trabalho disponíveis para o operador.
- * Apenas listas ativas com request_end_date >= hoje e que tenham ao menos um request do operador.
+ * Apenas listas ativas (request_name.active = true), request_end_date >= hoje
+ * e que tenham ao menos um request do operador.
  */
 export async function getWorklistNames(operatorId) {
   const id = Number(operatorId);
@@ -11,9 +12,11 @@ export async function getWorklistNames(operatorId) {
   const query = `
     SELECT DISTINCT r.request_name AS name
     FROM request r
+    INNER JOIN request_name rn ON rn.name = r.request_name
     WHERE r.request_active = 'True'
       AND (r.request_end_date IS NULL OR r.request_end_date >= CURRENT_DATE)
       AND r.operator_code_id = $1
+      AND (rn.active IS NULL OR rn.active = true)
     ORDER BY r.request_name
   `;
   const { rows } = await pool.query(query, [id]);

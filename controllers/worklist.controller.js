@@ -86,7 +86,6 @@ export async function updateRequestAccessController(req, res) {
  * Body: { request_status: string[] }
  */
 export async function updateRequestStatusController(req, res) {
-  console.log("Chegou no controller do status da requisição")
   try {
     const { requestId } = req.params;
     const { request_status: requestStatus } = req.body || {};

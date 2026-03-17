@@ -5,7 +5,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Copiar arquivos de dependências
-COPY package.json package-lock.json* ./
+COPY package.json* ./
 
 
 
@@ -15,9 +15,6 @@ RUN npm ci --omit=dev
 
 # Copiar o código da aplicação
 COPY . .
-
-# Remover o diretório node_modules para garantir que as dependências sejam instaladas novamente
-RUN rm -rf node_modules/.cache 
 
 # Porta exposta (será sobrescrita por PORT no runtime se necessário)
 EXPOSE 3000

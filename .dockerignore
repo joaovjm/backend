@@ -1,9 +1,9 @@
 node_modules
 npm-debug.log
+Dockerfile
 .env
 .env.*
 !.env.example
 .git
 .gitignore
-*.md
-.DS_Store
+.dockerignore

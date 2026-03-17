@@ -5,7 +5,8 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Copiar arquivos de dependências
-COPY package.json* ./
+COPY package*.json ./
+COPY package-lock.json ./
 
 
 
